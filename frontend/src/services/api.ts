@@ -6,6 +6,8 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Set a timeout to avoid hanging requests
+  timeout: 10000, // 10 seconds
 });
 
 // Add a request interceptor to add the auth token to every request
@@ -29,11 +31,20 @@ api.interceptors.response.use(
   },
   (error) => {
     // Handle 401 Unauthorized errors (token expired or invalid)
-    if (error.response && error.response.status === 401) {
-      // Clear local storage and redirect to login
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/auth/login';
+    if (error.response) {
+      if (error.response.status === 401 && window.location.pathname !== '/auth/login') {
+        // Clear local storage and redirect to login
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/auth/login?session=expired';
+      }
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('Network error:', error.request);
+      // We'll handle this in the components
+    } else {
+      // Something happened in setting up the request that triggered an Error
+      console.error('Error:', error.message);
     }
     return Promise.reject(error);
   }
@@ -47,8 +58,22 @@ export const authAPI = {
   register: (username: string, email: string, password: string) => {
     return api.post('/auth/register', { username, email, password });
   },
-  logout: () => {
-    return api.post('/auth/logout');
+  logout: async () => {
+    try {
+      const response = await api.post('/auth/logout');
+      // Clear local storage
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      // Redirect to login with logout parameter
+      window.location.href = '/auth/login?session=logout';
+      return response;
+    } catch (error) {
+      // Still clear storage and redirect even if the API call fails
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/auth/login?session=logout';
+      throw error;
+    }
   },
 };
 

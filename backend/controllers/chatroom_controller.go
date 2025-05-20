@@ -1,35 +1,25 @@
 package controllers
 
 import (
-	"context"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/ginchat/models"
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/ginchat/services"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"gorm.io/gorm"
 )
 
 // ChatroomController handles chatroom-related requests
 type ChatroomController struct {
-	DB       *gorm.DB
-	MongoDB  *mongo.Database
-	UserColl *mongo.Collection
-	ChatColl *mongo.Collection
-	MsgColl  *mongo.Collection
+	ChatroomService *services.ChatroomService
 }
 
 // NewChatroomController creates a new ChatroomController
 func NewChatroomController(db *gorm.DB, mongodb *mongo.Database) *ChatroomController {
+	chatroomService := services.NewChatroomService(mongodb)
 	return &ChatroomController{
-		DB:       db,
-		MongoDB:  mongodb,
-		ChatColl: mongodb.Collection("chatrooms"),
-		MsgColl:  mongodb.Collection("messages"),
+		ChatroomService: chatroomService,
 	}
 }
 
@@ -54,37 +44,14 @@ func (cc *ChatroomController) CreateChatroom(c *gin.Context) {
 	}
 	username, _ := c.Get("username")
 
-	// Check if chatroom with the same name already exists
-	var count int64
-	count, err := cc.ChatColl.CountDocuments(context.Background(), bson.M{"name": req.Name}, options.Count())
+	// Create chatroom using the service
+	chatroom, err := cc.ChatroomService.CreateChatroom(req.Name, userID.(uint), username.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check chatroom existence"})
-		return
-	}
-	if count > 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "Chatroom with this name already exists"})
-		return
-	}
-
-	// Create new chatroom
-	chatroom := models.Chatroom{
-		ID:        primitive.NewObjectID(),
-		Name:      req.Name,
-		CreatedBy: userID.(uint),
-		CreatedAt: time.Now(),
-		Members: []models.ChatroomMember{
-			{
-				UserID:   userID.(uint),
-				Username: username.(string),
-				JoinedAt: time.Now(),
-			},
-		},
-	}
-
-	// Save chatroom to MongoDB
-	_, err = cc.ChatColl.InsertOne(context.Background(), chatroom)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create chatroom"})
+		if err.Error() == "chatroom with this name already exists" {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
 
@@ -103,23 +70,15 @@ func (cc *ChatroomController) GetChatrooms(c *gin.Context) {
 		return
 	}
 
-	// Find all chatrooms
-	cursor, err := cc.ChatColl.Find(context.Background(), bson.M{})
+	// Get chatrooms using the service
+	chatrooms, err := cc.ChatroomService.GetChatrooms()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get chatrooms"})
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	// Decode chatrooms
-	var chatrooms []models.Chatroom
-	if err := cursor.All(context.Background(), &chatrooms); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode chatrooms"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Convert to response format
-	var response []models.ChatroomResponse
+	var response []interface{}
 	for _, chatroom := range chatrooms {
 		response = append(response, chatroom.ToResponse())
 	}
@@ -146,38 +105,16 @@ func (cc *ChatroomController) JoinChatroom(c *gin.Context) {
 	}
 	username, _ := c.Get("username")
 
-	// Check if chatroom exists
-	var chatroom models.Chatroom
-	err = cc.ChatColl.FindOne(context.Background(), bson.M{"_id": chatroomID}).Decode(&chatroom)
+	// Join chatroom using the service
+	err = cc.ChatroomService.JoinChatroom(chatroomID, userID.(uint), username.(string))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Chatroom not found"})
-		return
-	}
-
-	// Check if user is already a member
-	for _, member := range chatroom.Members {
-		if member.UserID == userID.(uint) {
-			c.JSON(http.StatusConflict, gin.H{"error": "User is already a member of this chatroom"})
-			return
+		if err.Error() == "chatroom not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		} else if err.Error() == "user is already a member of this chatroom" {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
-	}
-
-	// Add user to chatroom members
-	_, err = cc.ChatColl.UpdateOne(
-		context.Background(),
-		bson.M{"_id": chatroomID},
-		bson.M{
-			"$push": bson.M{
-				"members": models.ChatroomMember{
-					UserID:   userID.(uint),
-					Username: username.(string),
-					JoinedAt: time.Now(),
-				},
-			},
-		},
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join chatroom"})
 		return
 	}
 

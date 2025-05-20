@@ -1,25 +1,22 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
-
-	"github.com/joho/godotenv"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-
-	"github.com/ginchat/models"
-	"golang.org/x/crypto/bcrypt"
-
-	"context"
 	"time"
 
+	"github.com/ginchat/models"
+	"github.com/ginchat/services"
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func main() {
@@ -114,55 +111,41 @@ func initMySQL() (*gorm.DB, error) {
 	// Since we dropped and recreated the table, we always need to create test users
 	log.Println("Creating test users")
 
-	// Create test users
-	now := time.Now()
-	// LastLoginAt and Heartbeat are pointers, so we need to create them separately
-	var nilTime *time.Time = nil // nil for nullable fields
+	// Create a user service
+	userService := services.NewUserService(db)
 
-	testUsers := []models.User{
+	// Create test users using the user service
+	testUsers := []struct {
+		username string
+		email    string
+		password string
+		role     string
+	}{
 		{
-			Username:    "testuser1",
-			Email:       "test1@example.com",
-			Password:    hashPassword("password123"),
-			Role:        "member",
-			Status:      "offline",
-			AvatarURL:   "",
-			LastLoginAt: nilTime,
-			Heartbeat:   nilTime,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			username: "testuser1",
+			email:    "test1@example.com",
+			password: "password123",
+			role:     "member",
 		},
 		{
-			Username:    "testuser2",
-			Email:       "test2@example.com",
-			Password:    hashPassword("password123"),
-			Role:        "member",
-			Status:      "offline",
-			AvatarURL:   "",
-			LastLoginAt: nilTime,
-			Heartbeat:   nilTime,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			username: "testuser2",
+			email:    "test2@example.com",
+			password: "password123",
+			role:     "member",
 		},
 		{
-			Username:    "admin",
-			Email:       "admin@example.com",
-			Password:    hashPassword("password123"),
-			Role:        "admin",
-			Status:      "offline",
-			AvatarURL:   "",
-			LastLoginAt: nilTime,
-			Heartbeat:   nilTime,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			username: "admin",
+			email:    "admin@example.com",
+			password: "password123",
+			role:     "admin",
 		},
 	}
 
 	// Insert test users
-	for _, user := range testUsers {
-		result := db.Create(&user)
-		if result.Error != nil {
-			return nil, fmt.Errorf("failed to create test user %s: %v", user.Username, result.Error)
+	for _, userData := range testUsers {
+		_, err := userService.Register(userData.username, userData.email, userData.password, userData.role)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create test user %s: %v", userData.username, err)
 		}
 	}
 
@@ -337,15 +320,7 @@ func initMongoDB() (*mongo.Database, error) {
 	return db, nil
 }
 
-// Helper function to hash passwords
-// bcrypt automatically generates and includes a random salt in the hash
-func hashPassword(password string) string {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
-	}
-	return string(hashedPassword)
-}
+// Note: hashPassword function has been removed as we now use the UserService for creating users
 
 // Helper function to get environment variables with fallback
 func getEnv(key, fallback string) string {

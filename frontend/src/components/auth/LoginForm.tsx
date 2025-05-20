@@ -1,40 +1,105 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { authAPI } from '@/services/api';
+import AlertMessage from '@/components/ui/AlertMessage';
 
 type LoginFormData = {
   email: string;
   password: string;
 };
 
+type AlertState = {
+  type: 'success' | 'error' | 'warning' | 'info';
+  message: string;
+};
+
 const LoginForm = () => {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  
+  const [alert, setAlert] = useState<AlertState | null>(null);
+  const [loginAttempts, setLoginAttempts] = useState(0);
+
   const {
     register,
     handleSubmit,
     formState: { errors },
+    reset,
   } = useForm<LoginFormData>();
+
+  // Clear alert after 5 seconds
+  useEffect(() => {
+    if (alert) {
+      const timer = setTimeout(() => {
+        setAlert(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [alert]);
 
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
-    setError('');
-    
+    setAlert(null);
+
     try {
       const response = await authAPI.login(data.email, data.password);
-      
+
       // Store token in localStorage
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
-      
-      // Redirect to chat page
-      router.push('/chat');
+
+      // Show success message briefly before redirect
+      setAlert({
+        type: 'success',
+        message: 'Login successful! Redirecting to chat...'
+      });
+
+      // Redirect to chat page after a short delay
+      setTimeout(() => {
+        router.push('/chat');
+      }, 1000);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'An error occurred during login');
+      // Increment login attempts
+      setLoginAttempts(prev => prev + 1);
+
+      // Handle different error scenarios
+      if (err.response) {
+        if (err.response.status === 401) {
+          setAlert({
+            type: 'error',
+            message: 'Invalid email or password. Please try again.'
+          });
+        } else if (err.response.status === 429) {
+          setAlert({
+            type: 'warning',
+            message: 'Too many login attempts. Please try again later.'
+          });
+        } else {
+          setAlert({
+            type: 'error',
+            message: err.response.data?.error || 'An error occurred during login'
+          });
+        }
+      } else if (err.request) {
+        setAlert({
+          type: 'error',
+          message: 'Network error. Please check your connection and try again.'
+        });
+      } else {
+        setAlert({
+          type: 'error',
+          message: 'An unexpected error occurred. Please try again.'
+        });
+      }
+
+      // If too many failed attempts, show a helpful message
+      if (loginAttempts >= 2) {
+        setAlert({
+          type: 'info',
+          message: 'Having trouble logging in? You can reset your password or contact support.'
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -46,13 +111,15 @@ const LoginForm = () => {
         <h1 className="text-3xl font-bold">Login to GinChat</h1>
         <p className="mt-2 text-gray-600 dark:text-gray-400">Enter your credentials to access your account</p>
       </div>
-      
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-          <span className="block sm:inline">{error}</span>
-        </div>
+
+      {alert && (
+        <AlertMessage
+          type={alert.type}
+          message={alert.message}
+          onClose={() => setAlert(null)}
+        />
       )}
-      
+
       <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -61,7 +128,7 @@ const LoginForm = () => {
           <input
             id="email"
             type="email"
-            {...register('email', { 
+            {...register('email', {
               required: 'Email is required',
               pattern: {
                 value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
@@ -74,7 +141,7 @@ const LoginForm = () => {
             <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
           )}
         </div>
-        
+
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
             Password
@@ -89,18 +156,28 @@ const LoginForm = () => {
             <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
           )}
         </div>
-        
+
         <div>
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
+            className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 transition-all duration-200"
           >
-            {isLoading ? 'Logging in...' : 'Login'}
+            {isLoading ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Logging in...
+              </>
+            ) : (
+              'Login'
+            )}
           </button>
         </div>
       </form>
-      
+
       <div className="text-center mt-4">
         <p className="text-sm text-gray-600 dark:text-gray-400">
           Don't have an account?{' '}

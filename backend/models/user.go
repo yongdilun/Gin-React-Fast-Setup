@@ -3,7 +3,6 @@ package models
 import (
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -21,29 +20,6 @@ type User struct {
 	AvatarURL   string     `gorm:"size:255" json:"avatar_url"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
-}
-
-// BeforeSave is a GORM hook that hashes the password before saving
-func (u *User) BeforeSave(tx *gorm.DB) error {
-	if u.Password != "" && !isHashedPassword(u.Password) {
-		// Use a higher cost factor for better security (12 is a good balance between security and performance)
-		cost := 12
-
-		// Generate a salt and hash the password
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password), cost)
-		if err != nil {
-			return err
-		}
-		u.Password = string(hashedPassword)
-		// bcrypt already includes the salt in the hash
-	}
-	return nil
-}
-
-// isHashedPassword checks if a password is already hashed with bcrypt
-// bcrypt hashes start with $2a$, $2b$, or $2y$
-func isHashedPassword(password string) bool {
-	return len(password) > 4 && (password[:4] == "$2a$" || password[:4] == "$2b$" || password[:4] == "$2y$")
 }
 
 // BeforeCreate is a GORM hook that sets the timestamps before creating a record
@@ -64,12 +40,6 @@ func (u *User) BeforeUpdate(tx *gorm.DB) error {
 	return nil
 }
 
-// CheckPassword verifies if the provided password matches the stored hash
-func (u *User) CheckPassword(password string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
-	return err == nil
-}
-
 // TableName specifies the table name for the User model
 func (User) TableName() string {
 	return "users"
@@ -84,17 +54,4 @@ type UserResponse struct {
 	Status    string    `json:"status"`
 	AvatarURL string    `json:"avatar_url"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-// ToResponse converts a User to a UserResponse
-func (u *User) ToResponse() UserResponse {
-	return UserResponse{
-		UserID:    u.UserID,
-		Username:  u.Username,
-		Email:     u.Email,
-		Role:      u.Role,
-		Status:    u.Status,
-		AvatarURL: u.AvatarURL,
-		CreatedAt: u.CreatedAt,
-	}
 }

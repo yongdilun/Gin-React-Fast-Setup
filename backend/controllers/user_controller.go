@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/ginchat/models"
+	"github.com/ginchat/services"
 	"github.com/ginchat/utils"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -17,12 +17,14 @@ import (
 
 // UserController handles user-related requests
 type UserController struct {
-	DB *gorm.DB
+	UserService *services.UserService
 }
 
 // NewUserController creates a new UserController
-func NewUserController(db *gorm.DB) *UserController {
-	return &UserController{DB: db}
+func NewUserController(db *gorm.DB, userService *services.UserService) *UserController {
+	return &UserController{
+		UserService: userService,
+	}
 }
 
 // RegisterRequest represents the request body for user registration
@@ -63,28 +65,14 @@ func (uc *UserController) Register(c *gin.Context) {
 		return
 	}
 
-	// Check if user already exists
-	var existingUser models.User
-	if result := uc.DB.Where("email = ?", req.Email).Or("username = ?", req.Username).First(&existingUser); result.Error == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "User with this email or username already exists"})
-		return
-	}
-
-	// Create new user
-	now := time.Now()
-	user := models.User{
-		Username:  req.Username,
-		Email:     req.Email,
-		Password:  req.Password, // Will be hashed by BeforeSave hook
-		Role:      "member",
-		Status:    "offline",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	// Save user to database
-	if result := uc.DB.Create(&user); result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+	// Register user using the user service
+	user, err := uc.UserService.Register(req.Username, req.Email, req.Password, "member")
+	if err != nil {
+		if err.Error() == "user with this email or username already exists" {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
 
@@ -100,7 +88,7 @@ func (uc *UserController) Register(c *gin.Context) {
 
 	// Return user data and token
 	c.JSON(http.StatusCreated, gin.H{
-		"user":  user.ToResponse(),
+		"user":  uc.UserService.ToResponse(user),
 		"token": token,
 	})
 }
@@ -124,29 +112,14 @@ func (uc *UserController) Login(c *gin.Context) {
 		return
 	}
 
-	// Find user by email
-	var user models.User
-	if result := uc.DB.Where("email = ?", req.Email).First(&user); result.Error != nil {
-		// Use the same error message for security (don't reveal if email exists)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
-		return
-	}
-
-	// Check password using bcrypt's secure comparison
-	if !user.CheckPassword(req.Password) {
+	// Login user using the user service
+	user, err := uc.UserService.Login(req.Email, req.Password)
+	if err != nil {
 		// Add a small delay to prevent timing attacks
 		time.Sleep(time.Duration(100+rand.Intn(100)) * time.Millisecond)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
-
-	// Update user status
-	user.IsLogin = true
-	user.Status = "online"
-	now := time.Now()
-	user.LastLoginAt = &now
-	user.Heartbeat = &now
-	uc.DB.Save(&user)
 
 	// Generate JWT token
 	token, err := utils.GenerateJWT(user.UserID, user.Username, user.Email, user.Role)
@@ -160,7 +133,7 @@ func (uc *UserController) Login(c *gin.Context) {
 
 	// Return user data and token
 	c.JSON(http.StatusOK, gin.H{
-		"user":  user.ToResponse(),
+		"user":  uc.UserService.ToResponse(user),
 		"token": token,
 	})
 }
@@ -183,17 +156,23 @@ func (uc *UserController) Logout(c *gin.Context) {
 		return
 	}
 
-	// Find user
-	var user models.User
-	if result := uc.DB.First(&user, userID); result.Error != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+	// Convert userID to uint
+	userIDUint, ok := userID.(uint)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	// Update user status
-	user.IsLogin = false
-	user.Status = "offline"
-	uc.DB.Save(&user)
+	// Logout user using the user service
+	err := uc.UserService.Logout(userIDUint)
+	if err != nil {
+		if err.Error() == "user not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
 }

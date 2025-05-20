@@ -35,9 +35,9 @@ func NewWebSocketController(logger *logrus.Logger) *WebSocketController {
 
 // WebSocketMessage represents a message sent over WebSocket
 type WebSocketMessage struct {
-	Type      string      `json:"type"`
-	ChatroomID string     `json:"chatroom_id,omitempty"`
-	Data      interface{} `json:"data"`
+	Type       string      `json:"type"`
+	ChatroomID string      `json:"chatroom_id,omitempty"`
+	Data       interface{} `json:"data"`
 }
 
 // WebSocket connection upgrader
@@ -141,7 +141,7 @@ func (wsc *WebSocketController) HandleConnection(c *gin.Context) {
 }
 
 // pingClient sends periodic pings to keep the connection alive
-func (wsc *WebSocketController) pingClient(conn *websocket.Conn, userID uint) {
+func (wsc *WebSocketController) pingClient(conn *websocket.Conn, _ uint) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

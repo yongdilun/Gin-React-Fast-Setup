@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ginchat/controllers"
 	"github.com/ginchat/middleware"
+	"github.com/ginchat/services"
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/mongo"
 	"gorm.io/gorm"
@@ -11,10 +12,18 @@ import (
 
 // SetupRoutes configures all the routes for the application
 func SetupRoutes(r *gin.Engine, db *gorm.DB, mongodb *mongo.Database, logger *logrus.Logger) {
+	// Create services
+	userService := services.NewUserService(db)
+	// Create chatroom and message services but comment them out until they're used
+	// chatroomService := services.NewChatroomService(mongodb)
+	// messageService := services.NewMessageService(mongodb, chatroomService)
+
 	// Create controllers
-	userController := controllers.NewUserController(db)
+	userController := controllers.NewUserController(db, userService)
 	chatroomController := controllers.NewChatroomController(db, mongodb)
 	messageController := controllers.NewMessageController(db, mongodb)
+	// Use the messageService when the MessageController is updated to accept it
+	// messageController := controllers.NewMessageController(db, messageService)
 	websocketController := controllers.NewWebSocketController(logger)
 
 	// Health check endpoint
